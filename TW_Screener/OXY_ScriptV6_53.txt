@@ -1,0 +1,709 @@
+//@version=6
+indicator('Oxy Fundamental Panel V45', overlay = false)
+
+// ==============================================================================
+//  OXY FUNDAMENTAL PANEL V45 (IRR Exact Geometric Formula + Fixed Function Scope)
+// ==============================================================================
+
+// ===================================
+// INTERFACE E MODO DE OPERAÇÃO
+// ===================================
+grp_ui      = "Configuracoes de Ecra"
+is_mobile   = input.bool(false, "Modo Mobile (Max 5 anos)", group = grp_ui)
+txt_size_in = input.string("Normal", "Tamanho da Letra", options = ["Pequeno", "Normal"], group = grp_ui)
+
+grp_logs    = "Exportacao e Logs"
+tipo_log    = input.string("Investment Memo", "Conteudo do Log", options=["Investment Memo", "Exportar DCF (CSV)"], group = grp_logs)
+escala_csv  = input.string("Milhoes (/ 1.000.000)", "Escala dos Dados (CSV)", options=["Exato (x1)", "Milhares (/ 1.000)", "Milhoes (/ 1.000.000)"], group=grp_logs)
+
+t_size      = is_mobile ? size.small : (txt_size_in == "Pequeno" ? size.small : size.normal)
+is_normal   = tipo_log == "Investment Memo"
+
+C_BAD_STRONG  = color.new(#991f29, 0)
+C_BAD         = color.new(#f23645, 0)
+C_NEUTRAL     = color.new(#ff9800, 0)
+C_GOOD        = color.new(#089981, 0)
+C_GOOD_STRONG = color.new(#06594d, 0)
+C_BG          = #000000
+C_HEAD        = #131722
+C_GRID        = #363A45
+C_TXT_WHT     = #ffffff
+C_PLOT_CG     = #787B86
+C_PLOT_EM     = color.new(#FF9800, 0)
+C_PLOT_EV     = color.new(#2962FF, 0)
+
+bgcolor(color.new(#000000, 0))
+
+// ===================================
+// FUNÇÕES DE FORMATAÇÃO DE TEXTO PARA LOGS
+// ===================================
+f_pad_R(s, w) =>
+    string out = str.tostring(s)
+    int diff = w - str.length(out)
+    diff > 0 ? out + str.substring("                                                  ", 0, diff) : out
+
+f_pad_L(s, w) =>
+    string out = str.tostring(s)
+    int diff = w - str.length(out)
+    diff > 0 ? str.substring("                                                  ", 0, diff) + out : out
+
+fM(v) => na(v) ? f_pad_L("-", 8) : f_pad_L(str.tostring(v / 1000000, '#.0'), 8)
+fP(v) => na(v) ? f_pad_L("-", 8) : f_pad_L(str.tostring(v * 100, '#.0') + "%", 8)
+fX(v) => na(v) ? f_pad_L("-", 8) : f_pad_L(str.tostring(v, '#.0') + "x", 8)
+fV(v) => na(v) ? f_pad_L("-", 8) : f_pad_L(str.tostring(v, '#.00'), 8)
+
+// ===================================
+// 1. EXTRAÇÃO PURA DA API 
+// ===================================
+ebitda       = request.financial(syminfo.tickerid, 'EBITDA',                      'FY')
+ebit         = request.financial(syminfo.tickerid, 'EBIT',                        'FY')
+net_inc      = request.financial(syminfo.tickerid, 'NET_INCOME',                  'FY')
+eps          = request.financial(syminfo.tickerid, 'EARNINGS_PER_SHARE_BASIC',    'FY')
+mkt_cap      = request.financial(syminfo.tickerid, 'MARKET_CAP_BASIC',            'FY')
+cash         = request.financial(syminfo.tickerid, 'CASH_N_SHORT_TERM_INVEST',    'FY')
+shares       = request.financial(syminfo.tickerid, 'BASIC_SHARES_OUTSTANDING',    'FY')
+gross_profit = request.financial(syminfo.tickerid, 'GROSS_PROFIT',                'FY')
+revenue      = request.financial(syminfo.tickerid, 'TOTAL_REVENUE',               'FY')
+short_debt   = request.financial(syminfo.tickerid, 'SHORT_TERM_DEBT',             'FY')
+long_debt    = request.financial(syminfo.tickerid, 'LONG_TERM_DEBT',              'FY')
+capex        = request.financial(syminfo.tickerid, 'CAPITAL_EXPENDITURES',        'FY')
+cfo          = request.financial(syminfo.tickerid, 'CASH_F_OPERATING_ACTIVITIES', 'FY')
+interest_fy  = request.financial(syminfo.tickerid, 'INTEREST_EXPENSE',            'FY')
+
+t_assets     = request.financial(syminfo.tickerid, 'TOTAL_ASSETS',                'FY')
+t_liab       = request.financial(syminfo.tickerid, 'TOTAL_LIABILITIES',           'FY')
+t_eq         = request.financial(syminfo.tickerid, 'TOTAL_EQUITY',                'FY')
+cffi         = request.financial(syminfo.tickerid, 'CASH_F_INVESTING_ACTIVITIES', 'FY')
+cfff         = request.financial(syminfo.tickerid, 'CASH_F_FINANCING_ACTIVITIES', 'FY')
+
+ebitda_ttm   = request.financial(syminfo.tickerid, 'EBITDA',                      'TTM')
+ebit_ttm     = request.financial(syminfo.tickerid, 'EBIT',                        'TTM')
+ni_ttm       = request.financial(syminfo.tickerid, 'NET_INCOME',                  'TTM')
+eps_ttm      = request.financial(syminfo.tickerid, 'EARNINGS_PER_SHARE_BASIC',    'TTM')
+cfo_ttm      = request.financial(syminfo.tickerid, 'CASH_F_OPERATING_ACTIVITIES', 'TTM')
+capex_ttm    = request.financial(syminfo.tickerid, 'CAPITAL_EXPENDITURES',        'TTM')
+rev_ttm      = request.financial(syminfo.tickerid, 'TOTAL_REVENUE',               'TTM')
+gp_ttm       = request.financial(syminfo.tickerid, 'GROSS_PROFIT',                'TTM')
+interest_ttm = request.financial(syminfo.tickerid, 'INTEREST_EXPENSE',            'TTM') 
+cffi_ttm     = request.financial(syminfo.tickerid, 'CASH_F_INVESTING_ACTIVITIES', 'TTM')
+cfff_ttm     = request.financial(syminfo.tickerid, 'CASH_F_FINANCING_ACTIVITIES', 'TTM')
+
+get_fq(fq, fy_val) => na(fq) ? fy_val : fq
+shares_ttm = get_fq(request.financial(syminfo.tickerid, 'BASIC_SHARES_OUTSTANDING', 'FQ'), shares)
+cash_ttm   = get_fq(request.financial(syminfo.tickerid, 'CASH_N_SHORT_TERM_INVEST',  'FQ'), cash)
+sd_ttm     = get_fq(request.financial(syminfo.tickerid, 'SHORT_TERM_DEBT',           'FQ'), short_debt)
+ld_ttm     = get_fq(request.financial(syminfo.tickerid, 'LONG_TERM_DEBT',            'FQ'), long_debt)
+ast_ttm    = get_fq(request.financial(syminfo.tickerid, 'TOTAL_ASSETS',              'FQ'), t_assets)
+liab_ttm   = get_fq(request.financial(syminfo.tickerid, 'TOTAL_LIABILITIES',         'FQ'), t_liab)
+eq_ttm     = get_fq(request.financial(syminfo.tickerid, 'TOTAL_EQUITY',              'FQ'), t_eq)
+
+// ===================================
+// 2. MATEMÁTICA BASE E uFCF
+// ===================================
+capex_abs    = math.abs(nz(capex))
+int_fy_abs   = math.abs(nz(interest_fy))
+total_debt   = nz(short_debt) + nz(long_debt)
+ev           = nz(mkt_cap) - nz(cash) + total_debt
+
+fcf          = nz(cfo) + int_fy_abs - capex_abs
+
+opex         = nz(gross_profit) - nz(ebit)
+pretax       = nz(ebit) - int_fy_abs
+tax          = pretax - nz(net_inc)
+da           = nz(ebitda) - nz(ebit)
+
+ev_ebitda    = nz(ebitda) != 0 ? ev / nz(ebitda) : na
+debt_ebitda  = nz(ebitda) != 0 ? (total_debt - nz(cash)) / nz(ebitda) : na
+fcf_ebitda   = nz(ebitda) != 0 ? fcf / nz(ebitda) : na       
+gross_mg     = nz(revenue) != 0 ? nz(gross_profit) / nz(revenue) : na
+ebitda_mg    = nz(revenue) != 0 ? nz(ebitda)       / nz(revenue) : na
+fcf_yield    = ev != 0 ? fcf / ev : na 
+
+roe_fy       = nz(t_eq) > 0 ? nz(net_inc) / nz(t_eq) : na
+
+// ===================================
+// FILTRO ANTI-DUPLICAÇÃO E ANOS FISCAIS
+// ===================================
+raw_change = nz(ebitda) != nz(ebitda[1]) or nz(revenue) != nz(revenue[1])
+
+var float last_trigger_time = na
+bool new_fy = false
+if raw_change
+    if na(last_trigger_time) or (time - last_trigger_time) > 25000000000 
+        new_fy := true
+        last_trigger_time := time
+
+h(val, i) => ta.valuewhen(new_fy, val[1], i)
+
+report_time  = ta.valuewhen(new_fy, time, 0)
+report_year  = year(report_time)
+report_month = month(report_time)
+base_yr      = na(report_year) ? year(timenow) - 1 : (report_month <= 6 ? report_year - 1 : report_year)
+
+// ===================================
+// ARRAYS HISTÓRICOS GLOBAIS
+// ===================================
+arr_rev   = array.from(revenue, h(revenue,0), h(revenue,1), h(revenue,2), h(revenue,3), h(revenue,4), h(revenue,5), h(revenue,6), h(revenue,7), h(revenue,8))
+arr_ebitda= array.from(ebitda, h(ebitda,0), h(ebitda,1), h(ebitda,2), h(ebitda,3), h(ebitda,4), h(ebitda,5), h(ebitda,6), h(ebitda,7), h(ebitda,8))
+arr_ebit  = array.from(ebit, h(ebit,0), h(ebit,1), h(ebit,2), h(ebit,3), h(ebit,4), h(ebit,5), h(ebit,6), h(ebit,7), h(ebit,8))
+arr_ni    = array.from(net_inc, h(net_inc,0), h(net_inc,1), h(net_inc,2), h(net_inc,3), h(net_inc,4), h(net_inc,5), h(net_inc,6), h(net_inc,7), h(net_inc,8))
+arr_eps   = array.from(eps, h(eps,0), h(eps,1), h(eps,2), h(eps,3), h(eps,4), h(eps,5), h(eps,6), h(eps,7), h(eps,8))
+arr_gp    = array.from(gross_profit, h(gross_profit,0), h(gross_profit,1), h(gross_profit,2), h(gross_profit,3), h(gross_profit,4), h(gross_profit,5), h(gross_profit,6), h(gross_profit,7), h(gross_profit,8))
+arr_cfo   = array.from(cfo, h(cfo,0), h(cfo,1), h(cfo,2), h(cfo,3), h(cfo,4), h(cfo,5), h(cfo,6), h(cfo,7), h(cfo,8))
+arr_cx    = array.from(capex_abs, h(capex_abs,0), h(capex_abs,1), h(capex_abs,2), h(capex_abs,3), h(capex_abs,4), h(capex_abs,5), h(capex_abs,6), h(capex_abs,7), h(capex_abs,8))
+arr_csh   = array.from(cash, h(cash,0), h(cash,1), h(cash,2), h(cash,3), h(cash,4), h(cash,5), h(cash,6), h(cash,7), h(cash,8))
+arr_tdebt = array.from(total_debt, h(total_debt,0), h(total_debt,1), h(total_debt,2), h(total_debt,3), h(total_debt,4), h(total_debt,5), h(total_debt,6), h(total_debt,7), h(total_debt,8))
+arr_shrs  = array.from(shares, h(shares,0), h(shares,1), h(shares,2), h(shares,3), h(shares,4), h(shares,5), h(shares,6), h(shares,7), h(shares,8))
+arr_prc   = array.from(close, h(close,0), h(close,1), h(close,2), h(close,3), h(close,4), h(close,5), h(close,6), h(close,7), h(close,8))
+arr_ev    = array.from(ev, h(ev,0), h(ev,1), h(ev,2), h(ev,3), h(ev,4), h(ev,5), h(ev,6), h(ev,7), h(ev,8))
+arr_eve   = array.from(ev_ebitda, h(ev_ebitda,0), h(ev_ebitda,1), h(ev_ebitda,2), h(ev_ebitda,3), h(ev_ebitda,4), h(ev_ebitda,5), h(ev_ebitda,6), h(ev_ebitda,7), h(ev_ebitda,8))
+arr_de    = array.from(debt_ebitda, h(debt_ebitda,0), h(debt_ebitda,1), h(debt_ebitda,2), h(debt_ebitda,3), h(debt_ebitda,4), h(debt_ebitda,5), h(debt_ebitda,6), h(debt_ebitda,7), h(debt_ebitda,8))
+arr_fc    = array.from(fcf_ebitda, h(fcf_ebitda,0), h(fcf_ebitda,1), h(fcf_ebitda,2), h(fcf_ebitda,3), h(fcf_ebitda,4), h(fcf_ebitda,5), h(fcf_ebitda,6), h(fcf_ebitda,7), h(fcf_ebitda,8))
+arr_gm    = array.from(gross_mg, h(gross_mg,0), h(gross_mg,1), h(gross_mg,2), h(gross_mg,3), h(gross_mg,4), h(gross_mg,5), h(gross_mg,6), h(gross_mg,7), h(gross_mg,8))
+arr_em    = array.from(ebitda_mg, h(ebitda_mg,0), h(ebitda_mg,1), h(ebitda_mg,2), h(ebitda_mg,3), h(ebitda_mg,4), h(ebitda_mg,5), h(ebitda_mg,6), h(ebitda_mg,7), h(ebitda_mg,8))
+arr_fy    = array.from(fcf_yield, h(fcf_yield,0), h(fcf_yield,1), h(fcf_yield,2), h(fcf_yield,3), h(fcf_yield,4), h(fcf_yield,5), h(fcf_yield,6), h(fcf_yield,7), h(fcf_yield,8))
+arr_fcf   = array.from(fcf, h(fcf,0), h(fcf,1), h(fcf,2), h(fcf,3), h(fcf,4), h(fcf,5), h(fcf,6), h(fcf,7), h(fcf,8))
+arr_ast   = array.from(t_assets, h(t_assets,0), h(t_assets,1), h(t_assets,2), h(t_assets,3), h(t_assets,4), h(t_assets,5), h(t_assets,6), h(t_assets,7), h(t_assets,8))
+arr_liab  = array.from(t_liab, h(t_liab,0), h(t_liab,1), h(t_liab,2), h(t_liab,3), h(t_liab,4), h(t_liab,5), h(t_liab,6), h(t_liab,7), h(t_liab,8))
+arr_eq    = array.from(t_eq, h(t_eq,0), h(t_eq,1), h(t_eq,2), h(t_eq,3), h(t_eq,4), h(t_eq,5), h(t_eq,6), h(t_eq,7), h(t_eq,8))
+arr_cffi  = array.from(cffi, h(cffi,0), h(cffi,1), h(cffi,2), h(cffi,3), h(cffi,4), h(cffi,5), h(cffi,6), h(cffi,7), h(cffi,8))
+arr_cfff  = array.from(cfff, h(cfff,0), h(cfff,1), h(cfff,2), h(cfff,3), h(cfff,4), h(cfff,5), h(cfff,6), h(cfff,7), h(cfff,8))
+arr_int   = array.from(int_fy_abs, h(int_fy_abs,0), h(int_fy_abs,1), h(int_fy_abs,2), h(int_fy_abs,3), h(int_fy_abs,4), h(int_fy_abs,5), h(int_fy_abs,6), h(int_fy_abs,7), h(int_fy_abs,8))
+arr_opex  = array.from(opex, h(opex,0), h(opex,1), h(opex,2), h(opex,3), h(opex,4), h(opex,5), h(opex,6), h(opex,7), h(opex,8))
+arr_pretx = array.from(pretax, h(pretax,0), h(pretax,1), h(pretax,2), h(pretax,3), h(pretax,4), h(pretax,5), h(pretax,6), h(pretax,7), h(pretax,8))
+arr_tax   = array.from(tax, h(tax,0), h(tax,1), h(tax,2), h(tax,3), h(tax,4), h(tax,5), h(tax,6), h(tax,7), h(tax,8))
+arr_da    = array.from(da, h(da,0), h(da,1), h(da,2), h(da,3), h(da,4), h(da,5), h(da,6), h(da,7), h(da,8))
+
+arr_rev_full = array.from(revenue, h(revenue,0), h(revenue,1), h(revenue,2), h(revenue,3), h(revenue,4), h(revenue,5), h(revenue,6), h(revenue,7), h(revenue,8), h(revenue,9), h(revenue,10), h(revenue,11), h(revenue,12), h(revenue,13))
+
+// ===================================
+// FINANCIALS — TTM & ROIC
+// ===================================
+capex_ttm_abs = math.abs(nz(capex_ttm))
+int_ttm_abs   = math.abs(nz(interest_ttm))
+debt_ttm      = nz(sd_ttm) + nz(ld_ttm)
+mktcap_ttm    = shares_ttm * close
+ev_ttm        = mktcap_ttm - nz(cash_ttm) + debt_ttm
+
+fcf_ttm_val   = nz(cfo_ttm) + int_ttm_abs - capex_ttm_abs
+opex_ttm      = nz(gp_ttm) - nz(ebit_ttm)
+pretax_ttm    = nz(ebit_ttm) - int_ttm_abs
+tax_ttm       = pretax_ttm - nz(ni_ttm)
+da_ttm        = nz(ebitda_ttm) - nz(ebit_ttm)
+
+eve_ttm       = nz(ebitda_ttm) != 0 ? ev_ttm / ebitda_ttm : na
+de_ttm        = nz(ebitda_ttm) != 0 ? (debt_ttm - nz(cash_ttm)) / ebitda_ttm : na
+fc_ttm        = nz(ebitda_ttm) != 0 ? fcf_ttm_val / ebitda_ttm : na  
+gm_m_ttm      = nz(rev_ttm)    != 0 ? nz(gp_ttm)    / nz(rev_ttm) : na
+em_ttm        = nz(rev_ttm)    != 0 ? nz(ebitda_ttm) / nz(rev_ttm) : na
+fcf_yield_ttm = ev_ttm         != 0 ? fcf_ttm_val    / ev_ttm : na
+
+roe_ttm       = nz(eq_ttm) > 0 ? nz(ni_ttm) / nz(eq_ttm) : na
+net_debt_ttm  = debt_ttm - nz(cash_ttm)
+inv_cap_ttm   = nz(eq_ttm) + net_debt_ttm
+tax_rate_ttm  = pretax_ttm > 0 ? math.max(0.0, math.min(1.0, tax_ttm / pretax_ttm)) : 0.25 
+nopat_ttm     = ebit_ttm * (1.0 - tax_rate_ttm)
+roic_ttm      = inv_cap_ttm > 0 ? nopat_ttm / inv_cap_ttm : na
+
+// ===================================
+// LÓGICA DE CORES E SCORES 
+// ===================================
+get_color_ev(v, eb, ev_abs) => na(v) or na(eb) ? C_BG : eb <= 0 ? C_BAD_STRONG : nz(ev_abs) < 0 and eb > 0 ? C_GOOD_STRONG : v < 5 ? C_GOOD_STRONG : v < 10 ? C_GOOD : v < 12 ? C_NEUTRAL : v < 15 ? C_BAD : C_BAD_STRONG
+get_color_nd(v, eb) => na(v) or na(eb) ? C_BG : eb <= 0 ? C_BAD_STRONG : v < 0 ? C_GOOD_STRONG : v < 1.5 ? C_GOOD : v < 2.5 ? C_NEUTRAL : v < 3.5 ? C_BAD : C_BAD_STRONG
+get_color_fc(v, eb) => na(v) or na(eb) ? C_BG : eb <= 0 ? C_BAD_STRONG : v < 0.15 ? C_BAD_STRONG : v < 0.30 ? C_BAD : v < 0.45 ? C_NEUTRAL : v < 0.60 ? C_GOOD : C_GOOD_STRONG
+get_color_cagr(v) => na(v) ? C_BG : v < 0.03 ? C_BAD_STRONG : v < 0.06 ? C_BAD : v < 0.10 ? C_NEUTRAL : v < 0.15 ? C_GOOD : C_GOOD_STRONG
+get_color_em(v, eb) => na(v) or na(eb) ? C_BG : eb <= 0 ? C_BAD_STRONG : v < 0.05 ? C_BAD_STRONG : v < 0.10 ? C_BAD : v < 0.15 ? C_NEUTRAL : v < 0.20 ? C_GOOD : C_GOOD_STRONG
+get_color_fy_metric(v) => na(v) ? C_BG : v < 0.03 ? C_BAD_STRONG : v < 0.05 ? C_BAD : v < 0.08 ? C_NEUTRAL : v < 0.13 ? C_GOOD : C_GOOD_STRONG
+get_color_rg(v) => na(v) ? C_BG : v < 0.0 ? C_BAD_STRONG : v < 0.03 ? C_BAD : v < 0.08 ? C_NEUTRAL : v < 0.15 ? C_GOOD : C_GOOD_STRONG
+
+pts(c) => c == C_BAD_STRONG ? 1 : c == C_BAD ? 2 : c == C_NEUTRAL ? 3 : c == C_GOOD ? 4 : c == C_GOOD_STRONG ? 5 : 0
+
+get_base_score(c_ev, c_fy, c_nd, c_fc, c_cg) =>
+    tw = (pts(c_ev)>0 ? 0.25 : 0) + (pts(c_fy)>0 ? 0.0 : 0) + (pts(c_nd)>0 ? 0.25 : 0) + (pts(c_fc)>0 ? 0.30 : 0) + (pts(c_cg)>0 ? 0.20 : 0) // SCORE REBALANCEADO
+    tp = (pts(c_ev)>0 ? pts(c_ev)*0.25 : 0) + (pts(c_fy)>0 ? pts(c_fy)*0.0 : 0) + (pts(c_nd)>0 ? pts(c_nd)*0.25 : 0) + (pts(c_fc)>0 ? pts(c_fc)*0.30 : 0) + (pts(c_cg)>0 ? pts(c_cg)*0.20 : 0)
+    tw > 0 ? tp / (tw * 5.0) : na
+
+qual_txt(p) => na(p) ? "-" : p >= 0.30 ? "CRITICO" : p >= 0.20 ? "GRAVE" : p >= 0.15 ? "ALERTA" : p >= 0.08 ? "ATENCAO" : p >= 0.04 ? "MODERADO" : p >= 0.02 ? "LEVE" : "OK"
+qual_col(p) => na(p) ? C_BG : p >= 0.30 ? C_BAD_STRONG : p >= 0.20 ? color.new(#c62828, 0) : p >= 0.15 ? C_BAD : p >= 0.08 ? color.new(#f57c00, 0) : p >= 0.04 ? C_NEUTRAL : p >= 0.02 ? color.new(#ffc107, 0) : C_GOOD_STRONG
+
+calc_oxy_tradeoffs(ebitda_p, ebitda_av, fcf_, fcf_av, eve, fy, fc, cagr, fy_av, fc_av, de, de_av, gm, gm_av, f_vol, eve_av, fc_1, fc_2) =>
+    bool rule_sev_div_cx = not na(ebitda_p) and not na(ebitda_av) and not na(fcf_) and not na(fcf_av) and not na(fc) and not na(fc_1) and ebitda_p > ebitda_av and fcf_ < (fcf_av * 0.60) and fc < fc_av * 0.75 and fc_1 < fc_av * 0.75
+    bool rule_ult_trap   = not na(eve) and not na(fy) and not na(fc) and not na(fc_1) and not na(cagr) and eve < 8 and fy < 0.05 and fc < 0.35 and fc_1 < 0.40 and cagr < 0
+    bool rule_div_cx     = not na(ebitda_p) and not na(ebitda_av) and not na(fcf_) and not na(fcf_av) and not na(fc_1) and ebitda_p > ebitda_av and fcf_ < (fcf_av * 0.85) and fcf_ >= (fcf_av * 0.60) and fc_1 < fc_av * 0.90
+    bool rule_val_trap   = not na(eve) and not na(fy) and not na(cagr) and eve < 8 and fy < 0.05 and cagr < 0.04 and not rule_ult_trap
+    bool rule_liq_mode   = not na(fc) and not na(fc_av) and not na(cagr) and fc > fc_av and cagr < -0.03
+    bool rule_debt_fund  = not na(fc) and not na(fc_av) and not na(de) and not na(de_av) and fc > fc_av and de > de_av and (de - de_av) > 0.5
+    bool rule_bought_rev = not na(cagr) and not na(gm) and not na(gm_av) and cagr > 0.05 and gm < (gm_av - 0.05)
+    bool rule_eff_loss   = not na(fc) and not na(fy_av) and not na(gm) and not na(gm_av) and gm < (gm_av - 0.04) and cagr > 0.05
+    bool rule_blind_del  = not na(de) and not na(de_av) and not na(ebitda_p) and not na(ebitda_av) and de < de_av and ebitda_p < (ebitda_av * 0.80) and ebitda_p > 0
+    bool trap_dec3       = not na(fc) and not na(fc_1) and not na(fc_2) and fc < fc_1 and fc_1 < fc_2 and fc < 0.35
+    bool trap_vol        = not na(f_vol) and f_vol > 0.75
+    bool trap_val_10x    = not na(eve) and not na(eve_av) and eve_av > 0 and eve > eve_av * 1.3 and eve > 10
+
+    float pen_a = (rule_sev_div_cx ? 0.20 : 0.0) + (rule_ult_trap ? 0.20 : 0.0) + (rule_div_cx ? 0.10 : 0.0) + (rule_val_trap ? 0.10 : 0.0)
+    float pen_b = (rule_liq_mode ? 0.08 : 0.0) + (trap_dec3 ? 0.08 : 0.0) + (rule_debt_fund ? 0.05 : 0.0)
+    float pen_c = (rule_bought_rev ? 0.05 : 0.0) + (rule_eff_loss ? 0.05 : 0.0) + (rule_blind_del ? 0.05 : 0.0)
+    float pen_d = (trap_vol ? 0.05 : 0.0) + (trap_val_10x ? 0.04 : 0.0)
+    float total_pen = math.min(pen_a + pen_b + pen_c + pen_d, 1.0)
+    
+    string flags_str = ""
+    if rule_sev_div_cx
+        flags_str += "R1 "
+    if rule_ult_trap
+        flags_str += "R2 "
+    if rule_div_cx
+        flags_str += "R3 "
+    if rule_val_trap
+        flags_str += "R4 "
+    if rule_liq_mode
+        flags_str += "R5 "
+    if rule_debt_fund
+        flags_str += "R7 "
+    if rule_bought_rev
+        flags_str += "R9 "
+    if rule_eff_loss
+        flags_str += "R10 "
+    if rule_blind_del
+        flags_str += "R11 "
+    if trap_dec3
+        flags_str += "T13 "
+    if trap_vol
+        flags_str += "T8 "
+    if trap_val_10x
+        flags_str += "T1 "
+    [total_pen, flags_str]
+
+// ===================================
+// BLOCO DE DESENHO E PROCESSAMENTO FINAL
+// ===================================
+calc_yo_loc(curr, prev) => float(na(curr) or na(prev) or prev <= 0 ? na : (curr - prev) / math.abs(prev))
+calc_cagr_loc(v_end, v_start) => float(na(v_start) or na(v_end) or v_start <= 0 or v_end <= 0 ? na : math.pow(v_end / v_start, 0.2) - 1)
+
+// FUNÇÃO GLOBAL - Soma de FCF (Progressão Geométrica)
+get_acc_fcf(f0, g, yrs) => g == 0 ? f0 * yrs : f0 * (1.0 + g) * (math.pow(1.0 + g, yrs) - 1.0) / g
+
+get_avg5_loc(arr) =>
+    s = 0.0, n = 0
+    for i = 0 to 4
+        v = array.get(arr, i)
+        if not na(v)
+            s += v, n += 1
+    n > 0 ? s / n : na
+
+get_vol_loc(arr) =>
+    vals = array.new_float(0)
+    for i = 0 to 3
+        v = array.get(arr, i)
+        if not na(v) and v != 0
+            array.push(vals, v)
+    res = float(na)
+    if array.size(vals) >= 3
+        mx = array.max(vals), mn = array.min(vals)
+        if mx > 0
+            res := (mx - mn) / mx
+    res
+
+var table t = table.new(position.bottom_right, 13, 11, bgcolor = C_BG, frame_color = C_GRID, border_color = C_GRID, frame_width = 1, border_width = 1)
+
+fmt_v(v, f) => na(v) ? "-" : str.tostring(v, f)
+fmt_p(v, f) => na(v) ? "-" : str.tostring(v * 100, f) + "%"
+
+scale_div = escala_csv == "Milhoes (/ 1.000.000)" ? 1000000.0 : (escala_csv == "Milhares (/ 1.000)" ? 1000.0 : 1.0)
+csv_v(v) => na(v) ? "" : str.replace_all(str.tostring(v / scale_div, "#0.00"), ".", ",")
+csv_p(v) => na(v) ? "" : str.replace_all(str.tostring(v, "#0.00"), ".", ",")
+
+draw_c(r, c, txt, bg) => if not na(c)
+    table.cell(t, c, r, txt, bgcolor = bg, text_color = color.white, text_halign = text.align_right, text_font_family = font.family_monospace, text_size = t_size)
+draw_p(r, c, txt) => if not na(c)
+    table.cell(t, c, r, txt, bgcolor = C_BG, text_color = C_TXT_WHT, text_halign = text.align_right, text_font_family = font.family_monospace, text_size = t_size)
+draw_e(r, c) => if not na(c)
+    table.cell(t, c, r, "-", bgcolor = C_BG, text_color = C_PLOT_CG, text_halign = text.align_center, text_font_family = font.family_monospace, text_size = t_size)
+draw_h(r, c, txt, col, align) => if not na(c)
+    table.cell(t, c, r, txt, bgcolor = C_HEAD, text_color = col, text_halign = align, text_font_family = font.family_monospace, text_size = t_size)
+
+if barstate.islast
+    arr_rg   = array.new_float(10, na)
+    arr_cagr = array.new_float(10, na)
+    for i = 0 to 9
+        array.set(arr_rg, i, calc_yo_loc(array.get(arr_rev_full, i), array.get(arr_rev_full, i + 1)))
+        array.set(arr_cagr, i, calc_cagr_loc(array.get(arr_rev_full, i), array.get(arr_rev_full, i + 5)))
+
+    ebitda_avg = get_avg5_loc(arr_ebitda)
+    fcf_avg    = get_avg5_loc(arr_fcf)
+    eve_avg    = get_avg5_loc(arr_eve)
+    de_avg     = get_avg5_loc(arr_de)
+    fc_avg     = get_avg5_loc(arr_fc)
+    gm_avg     = get_avg5_loc(arr_gm)
+    em_avg     = get_avg5_loc(arr_em)
+    fy_avg     = get_avg5_loc(arr_fy)
+    cagr_avg   = get_avg5_loc(arr_cagr)
+    rg_avg     = get_avg5_loc(arr_rg)
+    fc_vol     = get_vol_loc(arr_fc)
+
+    cagr_ttm   = calc_cagr_loc(rev_ttm, array.get(arr_rev_full, 4))
+    rg_ttm     = calc_yo_loc(rev_ttm, array.get(arr_rev_full, 0))
+
+    bs_ttm = get_base_score(get_color_ev(eve_ttm, ebitda_ttm, ev_ttm), get_color_fy_metric(fcf_yield_ttm), get_color_nd(de_ttm, ebitda_ttm), get_color_fc(fc_ttm, ebitda_ttm), get_color_cagr(cagr_ttm))
+    bs_0   = get_base_score(get_color_ev(array.get(arr_eve,0), array.get(arr_ebitda,0), array.get(arr_ev,0)), get_color_fy_metric(array.get(arr_fy,0)), get_color_nd(array.get(arr_de,0), array.get(arr_ebitda,0)), get_color_fc(array.get(arr_fc,0), array.get(arr_ebitda,0)), get_color_cagr(array.get(arr_cagr,0)))
+
+    [pen_ttm, flg_ttm] = calc_oxy_tradeoffs(ebitda_ttm, ebitda_avg, fcf_ttm_val, fcf_avg, eve_ttm, fcf_yield_ttm, fc_ttm, cagr_ttm, fy_avg, fc_avg, de_ttm, de_avg, gm_m_ttm, gm_avg, fc_vol, eve_avg, array.get(arr_fc,0), array.get(arr_fc,1))
+    [pen_0, flg_0]     = calc_oxy_tradeoffs(array.get(arr_ebitda,0), ebitda_avg, array.get(arr_fcf,0), fcf_avg, array.get(arr_eve,0), array.get(arr_fy,0), array.get(arr_fc,0), array.get(arr_cagr,0), fy_avg, fc_avg, array.get(arr_de,0), de_avg, array.get(arr_gm,0), gm_avg, fc_vol, eve_avg, array.get(arr_fc,1), array.get(arr_fc,2))
+
+    sc_ttm = na(bs_ttm) ? na : math.max(0.0, bs_ttm - pen_ttm)
+    sc_0   = na(bs_0)   ? na : math.max(0.0, bs_0   - pen_0)
+
+    draw_h(0, 0, 'Metrica',        C_PLOT_CG,                      text.align_left)
+    draw_h(1, 0, 'Rev Growth YoY', color.new(#B2DFDB, 0),          text.align_left)
+    draw_h(2, 0, 'Margem Bruta',   color.new(#90CAF9, 0),          text.align_left)
+    draw_h(3, 0, 'EBITDA Margin',  color.new(C_PLOT_EM, 0),        text.align_left)
+    draw_h(4, 0, 'uFCF Conv %',    color.new(#A5D6A7, 0),          text.align_left)
+    draw_h(5, 0, 'uFCF Yield (EV)',color.new(#80CBC4, 0),          text.align_left)
+    draw_h(6, 0, 'ND/EBITDA',      color.new(#FFCC80, 0),          text.align_left)
+    draw_h(7, 0, 'EV/EBITDA',      color.new(C_PLOT_EV, 0),        text.align_left)
+    draw_h(8, 0, 'Qualidade',      color.gray,                     text.align_left)
+
+    draw_h(0, 1, '    TTM', C_PLOT_EV, text.align_right)
+    draw_c(1, 1, fmt_p(rg_ttm, '#'),        get_color_rg(rg_ttm))
+    draw_p(2, 1, fmt_p(gm_m_ttm, '#'))
+    draw_c(3, 1, fmt_p(em_ttm, '#'),        get_color_em(em_ttm, ebitda_ttm))
+    draw_c(4, 1, fmt_p(fc_ttm, '#'),        get_color_fc(fc_ttm, ebitda_ttm))
+    draw_c(5, 1, fmt_p(fcf_yield_ttm, '#'), get_color_fy_metric(fcf_yield_ttm))
+    draw_c(6, 1, fmt_v(de_ttm, '#.#'),      get_color_nd(de_ttm, ebitda_ttm))
+    draw_c(7, 1, fmt_v(eve_ttm, '#.#'),     get_color_ev(eve_ttm, ebitda_ttm, ev_ttm))
+    draw_c(8, 1, qual_txt(pen_ttm),         qual_col(pen_ttm))
+
+    for i = 0 to 9
+        if is_mobile and i > 4
+            break
+        col = i + 2
+        int recorded_yr = base_yr - i
+        h_txt = (is_mobile ? "" : "FY ") + str.tostring(recorded_yr, '#')
+        
+        draw_h(0, col, h_txt, i == 0 ? C_TXT_WHT : C_PLOT_CG, text.align_right)
+
+        draw_c(1, col, fmt_p(array.get(arr_rg, i), '#'),   get_color_rg(array.get(arr_rg, i)))
+        draw_p(2, col, fmt_p(array.get(arr_gm, i), '#'))
+        draw_c(3, col, fmt_p(array.get(arr_em, i), '#'),   get_color_em(array.get(arr_em, i), array.get(arr_ebitda, i)))
+        draw_c(4, col, fmt_p(array.get(arr_fc, i), '#'),   get_color_fc(array.get(arr_fc, i), array.get(arr_ebitda, i)))
+        draw_c(5, col, fmt_p(array.get(arr_fy, i), '#'),   get_color_fy_metric(array.get(arr_fy, i)))
+        draw_c(6, col, fmt_v(array.get(arr_de, i), '#.#'), get_color_nd(array.get(arr_de, i), array.get(arr_ebitda, i)))
+        draw_c(7, col, fmt_v(array.get(arr_eve, i), '#.#'),get_color_ev(array.get(arr_eve, i), array.get(arr_ebitda, i), array.get(arr_ev, i)))
+
+        if i == 0
+            draw_c(8, col, qual_txt(pen_0), qual_col(pen_0))
+        else
+            draw_e(8, col)
+
+    c_avg = is_mobile ? 7 : 12
+    draw_h(0, c_avg, '  Media 5Y', C_NEUTRAL, text.align_right)
+    draw_p(1, c_avg, fmt_p(rg_avg, '#'))
+    draw_p(2, c_avg, fmt_p(gm_avg, '#'))
+    draw_p(3, c_avg, fmt_p(em_avg, '#'))
+    draw_p(4, c_avg, fmt_p(fc_avg, '#'))
+    draw_p(5, c_avg, fmt_p(fy_avg, '#'))
+    draw_p(6, c_avg, fmt_v(de_avg, '#.#'))
+    draw_p(7, c_avg, fmt_v(eve_avg, '#.#'))
+    draw_e(8, c_avg)
+
+    if is_normal
+        // ===============================================
+        // CONSTRUÇÃO ESTRITA DO LOG OXY (SEMPRE PARA O CONSOLE LOG)
+        // ===============================================
+        
+        string yr4 = str.tostring(base_yr - 4)
+        string yr3 = str.tostring(base_yr - 3)
+        string yr2 = str.tostring(base_yr - 2)
+        string yr1 = str.tostring(base_yr - 1)
+        string yr0 = str.tostring(base_yr)
+
+        string main_log = "════════ OXY INVESTMENT MEMO — " + syminfo.ticker + " ════════\n"
+        
+        string trend_txt = na(sc_ttm) or na(sc_0) ? "→" : sc_ttm > sc_0 + 0.05 ? "↑" : sc_ttm < sc_0 - 0.05 ? "↓" : "→"
+        main_log += "► SCORE: " + fmt_p(sc_ttm, '#') + " (TTM)  |  " + fmt_p(sc_0, '#') + " (FY0)\n"
+        main_log += "► TENDENCIA: " + trend_txt + "  |  STATUS: " + qual_txt(pen_ttm) + "\n"
+        main_log += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+        main_log += "[ BUILD-UP OPERACIONAL E FINANCEIRO ]\n"
+        main_log += f_pad_R("Rubrica (Milhoes)", 32) + "|" + f_pad_L(yr4, 8) + " |" + f_pad_L(yr3, 8) + " |" + f_pad_L(yr2, 8) + " |" + f_pad_L(yr1, 8) + " |" + f_pad_L(yr0, 8) + " |" + f_pad_L("TTM", 8) + " |" + f_pad_L("Media 5Y", 8) + "\n"
+        main_log += "--------------------------------------------------------------------------------------------\n"
+        main_log += f_pad_R("Revenues", 32) + "|" + fM(array.get(arr_rev_full, 4)) + " |" + fM(array.get(arr_rev_full, 3)) + " |" + fM(array.get(arr_rev_full, 2)) + " |" + fM(array.get(arr_rev_full, 1)) + " |" + fM(array.get(arr_rev_full, 0)) + " |" + fM(rev_ttm) + " |" + fM(get_avg5_loc(arr_rev_full)) + "\n"
+        main_log += f_pad_R(" % Crescimento YoY", 32) + "|" + fP(array.get(arr_rg, 4)) + " |" + fP(array.get(arr_rg, 3)) + " |" + fP(array.get(arr_rg, 2)) + " |" + fP(array.get(arr_rg, 1)) + " |" + fP(array.get(arr_rg, 0)) + " |" + fP(rg_ttm) + " |" + fP(rg_avg) + "\n"
+        main_log += f_pad_R("EBITDA", 32) + "|" + fM(array.get(arr_ebitda, 4)) + " |" + fM(array.get(arr_ebitda, 3)) + " |" + fM(array.get(arr_ebitda, 2)) + " |" + fM(array.get(arr_ebitda, 1)) + " |" + fM(array.get(arr_ebitda, 0)) + " |" + fM(ebitda_ttm) + " |" + fM(ebitda_avg) + "\n"
+        main_log += f_pad_R(" % Margem EBITDA", 32) + "|" + fP(array.get(arr_em, 4)) + " |" + fP(array.get(arr_em, 3)) + " |" + fP(array.get(arr_em, 2)) + " |" + fP(array.get(arr_em, 1)) + " |" + fP(array.get(arr_em, 0)) + " |" + fP(em_ttm) + " |" + fP(em_avg) + "\n"
+        main_log += f_pad_R("(-) Capex", 32) + "|" + fM(array.get(arr_cx, 4)) + " |" + fM(array.get(arr_cx, 3)) + " |" + fM(array.get(arr_cx, 2)) + " |" + fM(array.get(arr_cx, 1)) + " |" + fM(array.get(arr_cx, 0)) + " |" + fM(capex_ttm_abs) + " |" + fM(get_avg5_loc(arr_cx)) + "\n"
+        main_log += f_pad_R("(-) Taxes", 32) + "|" + fM(array.get(arr_tax, 4)) + " |" + fM(array.get(arr_tax, 3)) + " |" + fM(array.get(arr_tax, 2)) + " |" + fM(array.get(arr_tax, 1)) + " |" + fM(array.get(arr_tax, 0)) + " |" + fM(tax_ttm) + " |" + fM(get_avg5_loc(arr_tax)) + "\n"
+        main_log += f_pad_R("(-) Net interest", 32) + "|" + fM(array.get(arr_int, 4)) + " |" + fM(array.get(arr_int, 3)) + " |" + fM(array.get(arr_int, 2)) + " |" + fM(array.get(arr_int, 1)) + " |" + fM(array.get(arr_int, 0)) + " |" + fM(int_ttm_abs) + " |" + fM(get_avg5_loc(arr_int)) + "\n"
+        main_log += f_pad_R("Free cash flow (unlevered)", 32) + "|" + fM(array.get(arr_fcf, 4)) + " |" + fM(array.get(arr_fcf, 3)) + " |" + fM(array.get(arr_fcf, 2)) + " |" + fM(array.get(arr_fcf, 1)) + " |" + fM(array.get(arr_fcf, 0)) + " |" + fM(fcf_ttm_val) + " |" + fM(fcf_avg) + "\n"
+        main_log += f_pad_R("FCF as % EBITDA", 32) + "|" + fP(array.get(arr_fc, 4)) + " |" + fP(array.get(arr_fc, 3)) + " |" + fP(array.get(arr_fc, 2)) + " |" + fP(array.get(arr_fc, 1)) + " |" + fP(array.get(arr_fc, 0)) + " |" + fP(fc_ttm) + " |" + fP(fc_avg) + "\n"
+        main_log += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+        // Cálculos de ROE e ROA pontuais para a tabela
+        float roe_4 = array.get(arr_eq, 4) > 0 ? array.get(arr_ni, 4) / array.get(arr_eq, 4) : na
+        float roe_3 = array.get(arr_eq, 3) > 0 ? array.get(arr_ni, 3) / array.get(arr_eq, 3) : na
+        float roe_2 = array.get(arr_eq, 2) > 0 ? array.get(arr_ni, 2) / array.get(arr_eq, 2) : na
+        float roe_1 = array.get(arr_eq, 1) > 0 ? array.get(arr_ni, 1) / array.get(arr_eq, 1) : na
+        float roe_0 = array.get(arr_eq, 0) > 0 ? array.get(arr_ni, 0) / array.get(arr_eq, 0) : na
+        
+        float roa_4 = array.get(arr_ast, 4) > 0 ? array.get(arr_ni, 4) / array.get(arr_ast, 4) : na
+        float roa_3 = array.get(arr_ast, 3) > 0 ? array.get(arr_ni, 3) / array.get(arr_ast, 3) : na
+        float roa_2 = array.get(arr_ast, 2) > 0 ? array.get(arr_ni, 2) / array.get(arr_ast, 2) : na
+        float roa_1 = array.get(arr_ast, 1) > 0 ? array.get(arr_ni, 1) / array.get(arr_ast, 1) : na
+        float roa_0 = array.get(arr_ast, 0) > 0 ? array.get(arr_ni, 0) / array.get(arr_ast, 0) : na
+        float roa_ttm = ast_ttm > 0 ? ni_ttm / ast_ttm : na
+
+        float roic_4 = array.get(arr_eq, 4) + (array.get(arr_tdebt, 4) - array.get(arr_csh, 4)) > 0 ? (array.get(arr_ebit, 4) * (1 - (array.get(arr_pretx, 4) > 0 ? math.max(0, math.min(1, array.get(arr_tax, 4)/array.get(arr_pretx, 4))) : 0.25))) / (array.get(arr_eq, 4) + (array.get(arr_tdebt, 4) - array.get(arr_csh, 4))) : na
+        float roic_3 = array.get(arr_eq, 3) + (array.get(arr_tdebt, 3) - array.get(arr_csh, 3)) > 0 ? (array.get(arr_ebit, 3) * (1 - (array.get(arr_pretx, 3) > 0 ? math.max(0, math.min(1, array.get(arr_tax, 3)/array.get(arr_pretx, 3))) : 0.25))) / (array.get(arr_eq, 3) + (array.get(arr_tdebt, 3) - array.get(arr_csh, 3))) : na
+        float roic_2 = array.get(arr_eq, 2) + (array.get(arr_tdebt, 2) - array.get(arr_csh, 2)) > 0 ? (array.get(arr_ebit, 2) * (1 - (array.get(arr_pretx, 2) > 0 ? math.max(0, math.min(1, array.get(arr_tax, 2)/array.get(arr_pretx, 2))) : 0.25))) / (array.get(arr_eq, 2) + (array.get(arr_tdebt, 2) - array.get(arr_csh, 2))) : na
+        float roic_1 = array.get(arr_eq, 1) + (array.get(arr_tdebt, 1) - array.get(arr_csh, 1)) > 0 ? (array.get(arr_ebit, 1) * (1 - (array.get(arr_pretx, 1) > 0 ? math.max(0, math.min(1, array.get(arr_tax, 1)/array.get(arr_pretx, 1))) : 0.25))) / (array.get(arr_eq, 1) + (array.get(arr_tdebt, 1) - array.get(arr_csh, 1))) : na
+        float roic_0 = array.get(arr_eq, 0) + (array.get(arr_tdebt, 0) - array.get(arr_csh, 0)) > 0 ? (array.get(arr_ebit, 0) * (1 - (array.get(arr_pretx, 0) > 0 ? math.max(0, math.min(1, array.get(arr_tax, 0)/array.get(arr_pretx, 0))) : 0.25))) / (array.get(arr_eq, 0) + (array.get(arr_tdebt, 0) - array.get(arr_csh, 0))) : na
+        float roic_avg = (nz(roic_4)+nz(roic_3)+nz(roic_2)+nz(roic_1)+nz(roic_0)) / 5
+
+        main_log += "[ RENTABILIDADE E VALUATION ]\n"
+        main_log += f_pad_R("Metrica", 32) + "|" + f_pad_L(yr4, 8) + " |" + f_pad_L(yr3, 8) + " |" + f_pad_L(yr2, 8) + " |" + f_pad_L(yr1, 8) + " |" + f_pad_L(yr0, 8) + " |" + f_pad_L("TTM", 8) + " |" + f_pad_L("Media 5Y", 8) + "\n"
+        main_log += "--------------------------------------------------------------------------------------------\n"
+        main_log += f_pad_R("ROIC", 32) + "|" + fP(roic_4) + " |" + fP(roic_3) + " |" + fP(roic_2) + " |" + fP(roic_1) + " |" + fP(roic_0) + " |" + fP(roic_ttm) + " |" + fP(roic_avg) + "\n"
+        main_log += f_pad_R("ROE", 32) + "|" + fP(roe_4) + " |" + fP(roe_3) + " |" + fP(roe_2) + " |" + fP(roe_1) + " |" + fP(roe_0) + " |" + fP(roe_ttm) + " |" + f_pad_L("-", 8) + "\n"
+        main_log += f_pad_R("ROA", 32) + "|" + fP(roa_4) + " |" + fP(roa_3) + " |" + fP(roa_2) + " |" + fP(roa_1) + " |" + fP(roa_0) + " |" + fP(roa_ttm) + " |" + f_pad_L("-", 8) + "\n"
+        main_log += f_pad_R("EV / EBITDA", 32) + "|" + fX(array.get(arr_eve, 4)) + " |" + fX(array.get(arr_eve, 3)) + " |" + fX(array.get(arr_eve, 2)) + " |" + fX(array.get(arr_eve, 1)) + " |" + fX(array.get(arr_eve, 0)) + " |" + fX(eve_ttm) + " |" + fX(eve_avg) + "\n"
+        main_log += f_pad_R("Net Debt / EBITDA", 32) + "|" + fX(array.get(arr_de, 4)) + " |" + fX(array.get(arr_de, 3)) + " |" + fX(array.get(arr_de, 2)) + " |" + fX(array.get(arr_de, 1)) + " |" + fX(array.get(arr_de, 0)) + " |" + fX(de_ttm) + " |" + fX(de_avg) + "\n"
+        main_log += f_pad_R("Levered FCF yield", 32) + "|" + fP(array.get(arr_fy, 4)) + " |" + fP(array.get(arr_fy, 3)) + " |" + fP(array.get(arr_fy, 2)) + " |" + fP(array.get(arr_fy, 1)) + " |" + fP(array.get(arr_fy, 0)) + " |" + fP(fcf_yield_ttm) + " |" + fP(fy_avg) + "\n"
+        main_log += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+        // IMPRESSÃO DE ALERTAS NOS LOGS
+        bool has_alerts = str.length(flg_ttm) > 0
+        main_log += "[ ALERTAS E AVISOS ]\n"
+        if has_alerts
+            if str.contains(flg_ttm, "R2 ")
+                main_log += " [CRITICO] Value Trap (Barata sem cresc)\n"
+            if str.contains(flg_ttm, "R1 ")
+                main_log += " [GRAVE] FCF quebra vs EBITDA\n"
+            if str.contains(flg_ttm, "R3 ")
+                main_log += " [ALERTA] Divergencia EBITDA vs FCF\n"
+            if str.contains(flg_ttm, "R4 ")
+                main_log += " [ALERTA] Estagnacao barata (<4% CAGR)\n"
+            if str.contains(flg_ttm, "T13 ")
+                main_log += " [ALERTA] Conversao de Caixa em queda\n"
+            if str.contains(flg_ttm, "R5 ")
+                main_log += " [MODERADO] Liquidacao (Receita cai)\n"
+            if str.contains(flg_ttm, "R9 ")
+                main_log += " [MODERADO] Crescimento comprado\n"
+            if str.contains(flg_ttm, "R10 ")
+                main_log += " [MODERADO] Margin Squeeze\n"
+            if str.contains(flg_ttm, "R7 ")
+                main_log += " [MODERADO] Alavancagem Crescente\n"
+            if str.contains(flg_ttm, "R11 ")
+                main_log += " [LEVE] Desalavancagem cega\n"
+            if str.contains(flg_ttm, "T8 ")
+                main_log += " [LEVE] Volatilidade no FCF\n"
+            if str.contains(flg_ttm, "T1 ")
+                main_log += " [LEVE] Valuation Premium\n"
+        else
+            main_log += " [✓] Sem alertas. Qualidade imaculada.\n"
+
+        main_log += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+        // ===============================================
+        // LÓGICA EXATA DO IRR GEOMÉTRICO (Oxy MOIC/DCF Model)
+        // ===============================================
+        float ebitda_cagr_5y = (not na(array.get(arr_ebitda,0)) and not na(array.get(arr_ebitda,5)) and array.get(arr_ebitda,5) > 0) ? math.pow(array.get(arr_ebitda,0) / array.get(arr_ebitda,5), 0.2) - 1 : na
+        float safe_g = not na(ebitda_cagr_5y) ? ebitda_cagr_5y : 0.0
+        float m_c = eve_ttm
+        float m_a = eve_avg
+        
+        float irr_bear = 0.0
+        float irr_base = 0.0
+        float irr_bull = 0.0
+        float moic_bear = 0.0
+        float moic_base = 0.0
+        float moic_bull = 0.0
+        string mult_str = "N/A"
+        string txt_bear = ""
+        string txt_base = ""
+        string txt_bull = ""
+
+        if not na(m_c) and not na(m_a) and m_c > 0 and m_a > 0 and ev_ttm > 0 and ebitda_ttm > 0
+            float mult_gap = m_a - m_c
+            
+            float mult_bear = mult_gap > 0 ? m_c : m_a 
+            float mult_base = m_c + (mult_gap * 0.5)   
+            float mult_bull = mult_gap > 0 ? m_a : m_c 
+            
+            float g_bear = safe_g * 0.6 
+            float g_base = safe_g
+            float g_bull = safe_g
+            
+            float fut_ebitda_bear = ebitda_ttm * math.pow(1 + g_bear, 5)
+            float fut_ebitda_base = ebitda_ttm * math.pow(1 + g_base, 5)
+            float fut_ebitda_bull = ebitda_ttm * math.pow(1 + g_bull, 5)
+            
+            float exit_ev_bear = fut_ebitda_bear * mult_bear
+            float exit_ev_base = fut_ebitda_base * mult_base
+            float exit_ev_bull = fut_ebitda_bull * mult_bull
+            
+            moic_bear := (exit_ev_bear + get_acc_fcf(fcf_ttm_val, g_bear, 5)) / ev_ttm
+            moic_base := (exit_ev_base + get_acc_fcf(fcf_ttm_val, g_base, 5)) / ev_ttm
+            moic_bull := (exit_ev_bull + get_acc_fcf(fcf_ttm_val, g_bull, 5)) / ev_ttm
+            
+            irr_bear := moic_bear > 0 ? math.pow(moic_bear, 1.0/5.0) - 1 : na
+            irr_base := moic_base > 0 ? math.pow(moic_base, 1.0/5.0) - 1 : na
+            irr_bull := moic_bull > 0 ? math.pow(moic_bull, 1.0/5.0) - 1 : na
+            
+            if mult_gap > 0
+                mult_str := str.tostring(m_c, '#.0') + "x  |  DESCONTO " + str.tostring(math.abs(mult_gap), '#.0') + "x vs media (" + str.tostring(m_a, '#.0') + "x)"
+                txt_bear := "BEAR  (crescimento -40%, sem re-rating)  "
+                txt_base := "BASE  (pleno + 50% reversao de multiplo) "
+                txt_bull := "BULL  (pleno + reversao total ao avg)    "
+            else
+                mult_str := str.tostring(m_c, '#.0') + "x  |  PREMIO " + str.tostring(math.abs(mult_gap), '#.0') + "x vs media (" + str.tostring(m_a, '#.0') + "x)"
+                txt_bear := "BEAR  (cresc. -40% + contracao total)    "
+                txt_base := "BASE  (cresc. pleno + contracao 50%)     "
+                txt_bull := "BULL  (cresc. pleno, mantem premio high) "
+
+        else if not na(m_c) and m_c > 0 and ev_ttm > 0 and ebitda_ttm > 0
+            mult_str := str.tostring(m_c, '#.0') + "x  |  Media indisponivel"
+            
+            moic_bear := ((ebitda_ttm * math.pow(1 + safe_g * 0.6, 5) * m_c) + get_acc_fcf(fcf_ttm_val, safe_g * 0.6, 5)) / ev_ttm
+            moic_base := ((ebitda_ttm * math.pow(1 + safe_g, 5) * m_c) + get_acc_fcf(fcf_ttm_val, safe_g, 5)) / ev_ttm
+            moic_bull := ((ebitda_ttm * math.pow(1 + safe_g * 1.2, 5) * m_c) + get_acc_fcf(fcf_ttm_val, safe_g * 1.2, 5)) / ev_ttm
+            
+            irr_bear := moic_bear > 0 ? math.pow(moic_bear, 1.0/5.0) - 1 : na
+            irr_base := moic_base > 0 ? math.pow(moic_base, 1.0/5.0) - 1 : na
+            irr_bull := moic_bull > 0 ? math.pow(moic_bull, 1.0/5.0) - 1 : na
+            
+            txt_bear := "BEAR  (crescimento -40%, mantem mult.)   "
+            txt_base := "BASE  (pleno, mantem multiplo)           "
+            txt_bull := "BULL  (crescimento +20%, mantem mult.)   "
+
+        main_log += "► LBO MODEL IRR (5 Anos - Geometrico):\n"
+        main_log += "    Crescimento (EBITDA CAGR) =  " + f_pad_L(str.tostring(safe_g * 100, '#.0') + "%", 6) + "\n"
+        main_log += "    Yield       (uFCF / EV)   =  " + f_pad_L(str.tostring(fcf_yield_ttm * 100, '#.0') + "%", 6) + "\n"
+        main_log += "    Multiplo    (EV/EBITDA)   =  " + mult_str + "\n"
+        main_log += "    ────────────────────────────────────────────────────────────────────────\n"
+        main_log += "    " + txt_bear + " ≈ IRR: " + f_pad_L(str.tostring(irr_bear * 100, '#.0') + "%", 6) + " | MOIC: " + str.tostring(moic_bear, '#.0') + "x\n"
+        main_log += "    " + txt_base + " ≈ IRR: " + f_pad_L(str.tostring(irr_base * 100, '#.0') + "%", 6) + " | MOIC: " + str.tostring(moic_base, '#.0') + "x\n"
+        main_log += "    " + txt_bull + " ≈ IRR: " + f_pad_L(str.tostring(irr_bull * 100, '#.0') + "%", 6) + " | MOIC: " + str.tostring(moic_bull, '#.0') + "x\n"
+        main_log += "════════════════════════════════════════════════════════════════════════════════"
+
+        // Emite o bloco gigante para a consola
+        log.info(main_log)
+
+    else
+        int last_idx = -1
+        for i = 0 to 9
+            if not na(array.get(arr_rev_full, i))
+                last_idx := i
+            else
+                break
+                
+        string str_anos   = ""
+        string str_rev    = "Revenues"
+        string str_gp     = "Gross Profit"
+        string str_opex   = "OPEX"
+        string str_ebit   = "Operating Profit"
+        string str_int    = "Interest"
+        string str_pre    = "Pretax"
+        string str_tax    = "Tax"
+        string str_ni     = "Net Income"
+        string str_eps    = "EPS"
+        string str_shrs   = "Shares"
+        string str_prc    = "Price"
+        string str_ev     = "EV"
+        string str_b1     = ""
+        string str_cash   = "Caixa"
+        string str_ast    = "Assets"
+        string str_debt   = "Debt"
+        string str_liab   = "Liabilities"
+        string str_eq     = "S/E"
+        string str_b2     = ""
+        string str_da     = "DA"
+        string str_cfo    = "CFFO"
+        string str_cpx    = "CapeX"
+        string str_cffi   = "CFFI"
+        string str_cfff   = "CFFF"
+        string str_fcf    = "uFCF"
+
+        if last_idx >= 0
+            for i = last_idx to 0
+                int yr_csv = base_yr - i
+                str_anos   += ";" + str.tostring(yr_csv, '#')
+                str_rev    += ";" + csv_v(array.get(arr_rev_full, i))
+                str_gp     += ";" + csv_v(array.get(arr_gp, i))
+                str_opex   += ";" + csv_v(array.get(arr_opex, i))
+                str_ebit   += ";" + csv_v(array.get(arr_ebit, i))
+                str_int    += ";" + csv_v(array.get(arr_int, i))
+                str_pre    += ";" + csv_v(array.get(arr_pretx, i))
+                str_tax    += ";" + csv_v(array.get(arr_tax, i))
+                str_ni     += ";" + csv_v(array.get(arr_ni, i))
+                str_eps    += ";" + csv_p(array.get(arr_eps, i)) 
+                str_shrs   += ";" + csv_v(array.get(arr_shrs, i))
+                str_prc    += ";" + csv_p(array.get(arr_prc, i)) 
+                str_ev     += ";" + csv_v(array.get(arr_ev, i))
+                str_b1     += ";"
+                str_cash   += ";" + csv_v(array.get(arr_csh, i))
+                str_ast    += ";" + csv_v(array.get(arr_ast, i))
+                str_debt   += ";" + csv_v(array.get(arr_tdebt, i))
+                str_liab   += ";" + csv_v(array.get(arr_liab, i))
+                str_eq     += ";" + csv_v(array.get(arr_eq, i))
+                str_b2     += ";"
+                str_da     += ";" + csv_v(array.get(arr_da, i))
+                str_cfo    += ";" + csv_v(array.get(arr_cfo, i))
+                str_cpx    += ";" + csv_v(array.get(arr_cx, i))
+                str_cffi   += ";" + csv_v(array.get(arr_cffi, i))
+                str_cfff   += ";" + csv_v(array.get(arr_cfff, i))
+                str_fcf    += ";" + csv_v(array.get(arr_fcf, i))
+                
+        str_anos   += ";TTM"
+        str_rev    += ";" + csv_v(rev_ttm)
+        str_gp     += ";" + csv_v(gp_ttm)
+        str_opex   += ";" + csv_v(opex_ttm)
+        str_ebit   += ";" + csv_v(ebit_ttm)
+        str_int    += ";" + csv_v(int_ttm_abs)
+        str_pre    += ";" + csv_v(pretax_ttm)
+        str_tax    += ";" + csv_v(tax_ttm)
+        str_ni     += ";" + csv_v(ni_ttm)
+        str_eps    += ";" + csv_p(eps_ttm)
+        str_shrs   += ";" + csv_v(shares_ttm)
+        str_prc    += ";" + csv_p(close) 
+        str_ev     += ";" + csv_v(ev_ttm)
+        str_b1     += ";"
+        str_cash   += ";" + csv_v(cash_ttm)
+        str_ast    += ";" + csv_v(ast_ttm)
+        str_debt   += ";" + csv_v(debt_ttm)
+        str_liab   += ";" + csv_v(liab_ttm)
+        str_eq     += ";" + csv_v(eq_ttm)
+        str_b2     += ";"
+        str_da     += ";" + csv_v(da_ttm)
+        str_cfo    += ";" + csv_v(cfo_ttm)
+        str_cpx    += ";" + csv_v(capex_ttm_abs)
+        str_cffi   += ";" + csv_v(cffi_ttm)
+        str_cfff   += ";" + csv_v(cfff_ttm)
+        str_fcf    += ";" + csv_v(fcf_ttm_val) + ";"
+
+        string dcf_csv = str_anos + "\n" +
+                         str_rev  + "\n" +
+                         str_gp   + "\n" +
+                         str_opex + "\n" +
+                         str_ebit + "\n" +
+                         str_int  + "\n" +
+                         str_pre  + "\n" +
+                         str_tax  + "\n" +
+                         str_ni   + "\n" +
+                         str_eps  + "\n" +
+                         str_shrs + "\n" +
+                         str_prc  + "\n" +
+                         str_ev   + "\n" +
+                         str_b1   + "\n" +
+                         str_cash + "\n" +
+                         str_ast  + "\n" +
+                         str_debt + "\n" +
+                         str_liab + "\n" +
+                         str_eq   + "\n" +
+                         str_b2   + "\n" +
+                         str_da   + "\n" +
+                         str_cfo  + "\n" +
+                         str_cpx  + "\n" +
+                         str_cffi + "\n" +
+                         str_cfff + "\n" +
+                         str_fcf
+
+        log.info(dcf_csv)
